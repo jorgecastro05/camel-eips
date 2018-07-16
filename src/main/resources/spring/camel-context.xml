@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:camel="http://camel.apache.org/schema/spring"
+       xmlns:ctx="http://www.springframework.org/schema/context"
+       xsi:schemaLocation="
+       http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+       http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+       http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+    <ctx:annotation-config/>
+    <ctx:component-scan base-package="com.fuse"/>
+    <!--the properties are automatically loaded by Spring boot-->
+    <camelContext id="camel" xmlns="http://camel.apache.org/schema/spring">
+
+        <route id="routeCBR">
+            <description>Shows the Cbr pattern</description>
+            <from uri="{{sourceDirectoryCsvUri}}"/>
+            <log message=">> Processing CSV files - ${file:onlyname}"/>
+            <choice>
+                <when>
+                    <simple>${file:onlyname} == 'EUPayments.txt'</simple>
+                    <log message="This is an Euro Payment: ${file:onlyname}"/>
+                    <to uri="{{euroSinkCsvUri}}"/>
+                </when>
+                <when>
+                    <simple>${file:onlyname} == 'USPayments.txt'</simple>
+                    <log message="This is an USD Payment: ${file:onlyname}"/>
+                    <to uri="{{usdSinkCsvUri}}"/>
+                </when>
+                <otherwise>
+                    <log message="This is an Other Currency Payment: ${file:onlyname}"/>
+                    <to uri="{{otherSinkCsvUri}}"/>
+                </otherwise>
+            </choice>
+        </route>
+
+        <route id="routeAggregation" xmlns:p="http://training.gpe.redhat.com/payment">
+            <description>Shows the aggregation pattern</description>
+            <from uri="{{sourceEndpoint}}"/>
+            <split>
+                <xpath>/p:Payments/p:Payment</xpath>
+                <convertBodyTo type="java.lang.String"/>
+                <aggregate strategyRef="bodyAppenderAggregator">
+                    <correlationExpression>
+                        <xpath resultType="java.lang.String">/p:Payment/p:to</xpath>
+                    </correlationExpression>
+                    <completionTimeout>
+                        <simple>5000</simple>
+                    </completionTimeout>
+                    <log message="\nGot aggregated payments with this content: \n${body}\n\nwhich is now being sent to the destination endpoint\n"/>
+                    <to uri="{{destinationEndpoint}}"/>
+                </aggregate>
+            </split>
+        </route>
+
+        <route id="routeDynamicRouter">
+            <description>Shows the dynamic router pattern</description>
+            <from uri="timer:recipient?period=5000"/>
+            <setBody>
+                <constant>Say Hello for recipient</constant>
+            </setBody>
+            <setHeader headerName="recipients">
+                <simple resultType="String">direct:a;direct:b</simple>
+            </setHeader>
+            <recipientList>
+                <tokenize token=";" headerName="recipients"/>
+            </recipientList>
+        </route>
+
+        <route id="routeStaticRouteA">
+            <from uri="direct:a"/>
+            <log message=">> Recipient A called - ${body}"/>
+        </route>
+        <route id="routeStaticRouteB">
+            <from uri="direct:b"/>
+            <log message=">> Recipient B called - ${body}"/>
+        </route>
+
+        <route id="routeEnrich">
+            <description>Shows the Enrich Pattern</description>
+            <from uri="timer:recipient?period=5000"/>
+            <setBody>
+                <constant>Message</constant>
+            </setBody>
+            <log message=">> Before enrichment. My body is : ${body}"/>
+            <enrich strategyRef="sampleAggregator">
+                <simple>direct:resource</simple>
+            </enrich>
+            <log message=">> After enrichment. My body is : ${in.body}"/>
+        </route>
+
+        <route id="routeEnrichSource">
+            <from uri="direct:resource"/>
+            <setExchangePattern pattern="InOut"/>
+            <transform>
+                <constant>blah</constant>
+            </transform>
+        </route>
+
+    </camelContext>
+
+</beans>
